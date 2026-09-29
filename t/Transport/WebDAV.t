@@ -101,7 +101,7 @@ sub _mock_response {
 }
 
 subtest '_list_files' => sub {
-    plan tests => 3;
+    plan tests => 4;
 
     my $ua_module = Test::MockModule->new('Mojo::UserAgent');
 
@@ -195,6 +195,53 @@ XML
         my $files = $transport->_list_files;
         is( scalar @$files, 1, 'one entry returned' );
         is( $files->[0]->{size}, undef, 'size is undef for a collection with no getcontentlength' );
+    };
+
+    $ua_module->mock(
+        start => sub {
+            return _mock_response(<<'XML');
+<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/base/</D:href>
+    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/base/my%20file.csv</D:href>
+    <D:propstat><D:prop>
+      <D:resourcetype/>
+      <D:getcontentlength>10</D:getcontentlength>
+    </D:prop></D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/base/command%C3%A9.csv</D:href>
+    <D:propstat><D:prop>
+      <D:resourcetype/>
+      <D:getcontentlength>20</D:getcontentlength>
+    </D:prop></D:propstat>
+  </D:response>
+</D:multistatus>
+XML
+        }
+    );
+
+    # RFC 4918 <href> values are percent-encoded: a space becomes %20, and
+    # non-ASCII characters become percent-encoded UTF-8 bytes (e.g. %C3%A9
+    # for 'e' with an acute accent). Real filenames must come back decoded,
+    # matching the parity SFTP/FTP/Local already have with real names.
+    subtest 'percent-encoded filenames are decoded to real names' => sub {
+        plan tests => 3;
+        my $files = $transport->_list_files;
+        is( scalar @$files, 2, 'collection itself excluded, two entries returned' );
+
+        my ($space_file) = grep { $_->{filename} eq 'my file.csv' } @$files;
+        ok( $space_file, 'percent-encoded space (%20) decoded to a real space in the filename' );
+
+        my ($accented_file) = grep { $_->{filename} =~ /^command/ } @$files;
+        is(
+            $accented_file->{filename}, "command\x{e9}.csv",
+            'percent-encoded UTF-8 bytes (%C3%A9) decoded to the real accented character'
+        );
     };
 };
 
@@ -315,6 +362,21 @@ subtest '_download_file request shape' => sub {
     my $written = <$fh>;
     close $fh;
     is( $written, 'downloaded content', 'response body written to the local file via move_to' );
+};
+
+subtest '_ua TLS verification wiring' => sub {
+    plan tests => 2;
+
+    my $module = Test::MockModule->new('Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV');
+    $module->mock( host => sub { 'dav.example.com' }, port => sub {443} );
+
+    $module->mock( debug => sub {1} );
+    my $debug_on = bless {}, 'Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV';
+    ok( $debug_on->_ua->insecure, 'insecure is set on the UA when debug is on' );
+
+    $module->mock( debug => sub {0} );
+    my $debug_off = bless {}, 'Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV';
+    ok( !$debug_off->_ua->insecure, 'insecure is not set on the UA when debug is off' );
 };
 
 subtest '_response_error' => sub {

@@ -20,6 +20,7 @@ use Modern::Perl;
 use Mojo::UserAgent;
 use Mojo::URL;
 use Mojo::DOM;
+use Mojo::Util qw( url_unescape decode );
 use HTTP::Date qw( str2time );
 
 use base qw(Koha::File::Transport);
@@ -151,10 +152,11 @@ sub _url_for {
 
 Returns this transport's Mojo::UserAgent instance, creating it on first
 use. TLS certificate verification is disabled when this transport row's
-C<debug> flag is on (used for the self-signed cert on the KTD test
-container - see this repo's compose/webdav.yml) - there is no dedicated
-"skip TLS verification" column on file_transports, and adding one is
-out of scope for a plugin (see this repo's design spec).
+C<debug> flag is on, so this transport can be tested against a
+self-hosted WebDAV server with a self-signed (or otherwise untrusted)
+certificate - there is no dedicated "skip TLS verification" column on
+file_transports, and adding one is out of scope for a plugin (see this
+repo's design spec).
 
 =cut
 
@@ -331,6 +333,32 @@ sub _change_directory {
     return 1;
 }
 
+=head3 _decode_href_path
+
+    my $path = $self->_decode_href_path( $path );
+
+PROPFIND C<< <href> >> values are percent-encoded per RFC 4918 (a space
+becomes C<%20>, non-ASCII characters become percent-encoded UTF-8
+bytes, and so on). This undoes that: C<Mojo::Util::url_unescape>
+returns the path with percent-encoding removed (still raw bytes), then
+C<Mojo::Util::decode('UTF-8', ...)> interprets those bytes as UTF-8 to
+recover the real characters. Used both for the filename extracted from
+each C<href> and for the paths compared to detect the collection's own
+entry, so that comparison isn't fooled by a server that percent-encodes
+the same path differently than Mojo does (e.g. C<%2f> vs C<%2F>).
+
+=cut
+
+sub _decode_href_path {
+    my ( $self, $path ) = @_;
+
+    return $path unless defined $path;
+
+    my $bytes = url_unescape($path);
+
+    return decode( 'UTF-8', $bytes ) // $path;
+}
+
 =head3 _list_files
 
 Internal method that performs a PROPFIND (Depth: 1) against the
@@ -342,6 +370,12 @@ Namespace prefixes on the multistatus response vary by server (C<D:>,
 C<d:>, or none with a default namespace) - they're stripped before
 parsing so tag names can be matched without caring which prefix a given
 server happens to use.
+
+C<< <href> >> values are percent-encoded (see L</_decode_href_path>);
+both the collection-self comparison and the returned C<filename> use
+the decoded path so real (not percent-encoded) names come back, and so
+the comparison isn't sensitive to a server's particular escaping
+choices.
 
 =cut
 
@@ -369,7 +403,7 @@ sub _list_files {
     ( my $xml = $res->body ) =~ s{<(/?)[A-Za-z0-9]+:}{<$1}g;
     my $dom = Mojo::DOM->new->xml(1)->parse($xml);
 
-    my $request_path = $url->path->to_string;
+    my $request_path = $self->_decode_href_path( $url->path->to_string );
     $request_path =~ s{/+$}{} unless $request_path eq '/';
 
     my @files;
@@ -377,7 +411,7 @@ sub _list_files {
         my $href_el = $response->at('href') or next;
         my $href    = $href_el->text;
 
-        my $href_path = Mojo::URL->new($href)->path->to_string;
+        my $href_path = $self->_decode_href_path( Mojo::URL->new($href)->path->to_string );
         $href_path =~ s{/+$}{} unless $href_path eq '/';
         next if $href_path eq $request_path;    # skip the collection itself
 
