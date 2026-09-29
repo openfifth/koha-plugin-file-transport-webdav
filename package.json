@@ -1,9 +1,9 @@
 {
   "plugin": {
-    "module": "Koha::Plugin::Com::Organisation::PluginName",
-    "pm_path": "Koha/Plugin/Com/Organisation/PluginName.pm"
+    "module": "Koha::Plugin::Com::OpenFifth::FileTransportWebDAV",
+    "pm_path": "Koha/Plugin/Com/OpenFifth/FileTransportWebDAV.pm"
   },
-  "version": "0.0.0",
+  "version": "0.1.0",
   "previous_version": "0.0.0",
   "scripts": {
     "version:patch": "node increment_version.js patch | cat",
