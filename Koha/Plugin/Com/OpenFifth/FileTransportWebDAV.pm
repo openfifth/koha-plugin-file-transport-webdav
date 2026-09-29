@@ -19,7 +19,7 @@ use Modern::Perl;
 
 use base qw(Koha::Plugins::Base);
 
-our $VERSION         = '0.1.0';
+our $VERSION         = '0.1.1';
 our $MINIMUM_VERSION = "24.11.00.000";
 
 our $metadata = {
