@@ -14,4 +14,6 @@ services:
 networks:
     kohanet:
         external: true
+        # NOTE: assumes default compose project-name prefixing; verify with
+        # 'docker network ls | grep kohanet' against a live KTD instance
         name: ${COMPOSE_PROJECT_NAME:-bug_43666}_kohanet

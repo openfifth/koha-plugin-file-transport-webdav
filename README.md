@@ -146,11 +146,10 @@ service-name DNS) and from the host at `https://localhost:8443/` for
 manual `curl`/browser sanity checks. Credentials: `koha`/`koha`.
 
 Because the cert is self-signed, a `file_transports` row pointed at this
-container needs its `debug` flag on (see `Koha::Plugin::Com::OpenFifth::
-File::Transport::WebDAV::_ua`) to skip TLS verification - this is a
-test-only convenience, not a recommendation for production WebDAV
-endpoints, which should use a properly-signed certificate and leave
-`debug` off.
+container needs its `debug` flag on (see `Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV::_ua`)
+to skip TLS verification - this is a test-only convenience, not a recommendation
+for production WebDAV endpoints, which should use a properly-signed certificate
+and leave `debug` off.
 
 ## Maintenance
 
