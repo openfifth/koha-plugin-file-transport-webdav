@@ -1,0 +1,17 @@
+services:
+    webdav:
+        image: bytemark/webdav
+        environment:
+            AUTH_TYPE: Basic
+            USERNAME: koha
+            PASSWORD: koha
+            SSL_CERT: selfsigned
+        ports:
+            - "8443:443"
+        networks:
+            - kohanet
+
+networks:
+    kohanet:
+        external: true
+        name: ${COMPOSE_PROJECT_NAME:-bug_43666}_kohanet

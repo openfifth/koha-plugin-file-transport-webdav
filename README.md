@@ -127,6 +127,31 @@ You can customize the workflow by:
 3. Customizing the release process
 4. Modifying the version increment logic in `increment_version.js`
 
+## Testing against a real WebDAV server
+
+`compose/webdav.yml` adds a `bytemark/webdav` service (Basic auth,
+self-signed TLS) to a running KTD instance, for real end-to-end testing
+of this plugin's transport (rather than the public test WebDAV servers
+that exist on the internet, which are third-party services not
+appropriate to build a repeatable test plan around).
+
+Bring it up alongside a KTD instance that also has this plugin mounted:
+
+```bash
+ktd --name bug_43666 --single-plugin "$(pwd)" -f "$(pwd)/compose/webdav.yml" up -d
+```
+
+Reachable from the `koha` container at `https://webdav:443/` (compose
+service-name DNS) and from the host at `https://localhost:8443/` for
+manual `curl`/browser sanity checks. Credentials: `koha`/`koha`.
+
+Because the cert is self-signed, a `file_transports` row pointed at this
+container needs its `debug` flag on (see `Koha::Plugin::Com::OpenFifth::
+File::Transport::WebDAV::_ua`) to skip TLS verification - this is a
+test-only convenience, not a recommendation for production WebDAV
+endpoints, which should use a properly-signed certificate and leave
+`debug` off.
+
 ## Maintenance
 
 The `release` job pins `bywatersolutions/github-action-koha-plugin-create-kpz`
