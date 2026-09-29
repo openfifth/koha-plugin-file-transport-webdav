@@ -115,6 +115,13 @@ Returns a Mojo::URL for the given path (defaulting to _current_path)
 against this transport's base URL, with credentials attached for Basic
 auth. Mojo::URL handles percent-encoding of the path itself.
 
+The base URL's own path (e.g. a Nextcloud-style
+C</remote.php/dav/files/E<lt>userE<gt>/> configured in C<host>) is
+preserved and joined with the target path - C<< $url->path(...) >>
+would otherwise wholesale *replace* the existing path for an absolute
+target (see Mojo::Path::merge), silently dropping any subpath C<host>
+was configured with.
+
 =cut
 
 sub _url_for {
@@ -124,7 +131,12 @@ sub _url_for {
     $target = '/' . $target unless $target =~ m{^/};
 
     my $url = Mojo::URL->new( $self->_base_url );
-    $url->path($target);
+
+    my $base_path = $url->path->to_string;
+    $base_path = '' if $base_path eq '/';
+    $base_path =~ s{/$}{};
+
+    $url->path( $base_path . $target );
 
     if ( $self->user_name ) {
         $url->userinfo( join( ':', $self->user_name, $self->plain_text_password // '' ) );
@@ -156,6 +168,29 @@ sub _ua {
     }
 
     return $self->{ua};
+}
+
+=head3 _response_error
+
+    my $message = $self->_response_error( $res, $fallback );
+
+Returns the most useful diagnostic message available for a failed
+response: a genuine transport-level error (DNS failure, connection
+refused, TLS handshake/certificate error - exactly the class of problem
+the C<debug>/C<insecure> TLS-skip option exists to help diagnose) is
+recorded by Mojo::UserAgent on C<< $res->error >>, with a real message
+under C<< ->{message} >>, while C<< $res->message >> is only the HTTP
+reason phrase and stays undef for such failures. C<$fallback> is used
+only if neither is available.
+
+=cut
+
+sub _response_error {
+    my ( $self, $res, $fallback ) = @_;
+
+    my $error = $res->error;
+
+    return ( $error && $error->{message} ) // $res->message // $fallback;
 }
 
 =head3 _propfind_body
@@ -192,7 +227,7 @@ sub _connect {
         return $self->_abort_operation(
             $operation,
             {
-                error  => $res->message // 'connection failed',
+                error  => $self->_response_error( $res, 'connection failed' ),
                 status => $res->code,
                 path   => $url->to_string,
             }
@@ -276,7 +311,7 @@ sub _change_directory {
         return $self->_abort_operation(
             $operation,
             {
-                error  => "Directory not found: $remote_directory",
+                error  => $self->_response_error( $tx->res, "Directory not found: " . ( $remote_directory // '' ) ),
                 status => $tx->res->code,
                 path   => $remote_directory,
             }
@@ -324,7 +359,7 @@ sub _list_files {
         return $self->_abort_operation(
             $operation,
             {
-                error  => $res->message // 'PROPFIND failed',
+                error  => $self->_response_error( $res, 'PROPFIND failed' ),
                 status => $res->code,
                 path   => $url->to_string,
             }
@@ -398,7 +433,7 @@ sub _upload_file {
         return $self->_abort_operation(
             $operation,
             {
-                error  => $tx->res->message // 'upload failed',
+                error  => $self->_response_error( $tx->res, 'upload failed' ),
                 status => $tx->res->code,
                 path   => $url->to_string,
             }
@@ -431,7 +466,7 @@ sub _download_file {
         return $self->_abort_operation(
             $operation,
             {
-                error  => $tx->res->message // 'download failed',
+                error  => $self->_response_error( $tx->res, 'download failed' ),
                 status => $tx->res->code,
                 path   => $url->to_string,
             }
@@ -476,7 +511,7 @@ sub _rename_file {
         return $self->_abort_operation(
             $operation,
             {
-                error  => $tx->res->message // 'rename failed',
+                error  => $self->_response_error( $tx->res, 'rename failed' ),
                 status => $tx->res->code,
                 path   => $source_url->to_string . ' -> ' . $destination_url->to_string,
             }
