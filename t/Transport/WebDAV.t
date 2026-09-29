@@ -84,6 +84,239 @@ subtest '_url_for' => sub {
         'subpath and credentials combine correctly' );
 };
 
+use Mojo::Transaction::HTTP;
+
+sub _mock_response {
+    my ($body) = @_;
+
+    my $res = Mojo::Message::Response->new;
+    $res->code(207);
+    $res->headers->content_type('application/xml; charset=utf-8');
+    $res->body($body);
+
+    my $tx = Mojo::Transaction::HTTP->new;
+    $tx->res($res);
+
+    return $tx;
+}
+
+subtest '_list_files' => sub {
+    plan tests => 3;
+
+    my $ua_module = Test::MockModule->new('Mojo::UserAgent');
+
+    $ua_module->mock(
+        build_tx => sub { return Mojo::Transaction::HTTP->new },
+        start    => sub {
+            return _mock_response(<<'XML');
+<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/base/</D:href>
+    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+  </D:response>
+</D:multistatus>
+XML
+        }
+    );
+
+    my $module = Test::MockModule->new('Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV');
+    $module->mock( host => sub { 'dav.example.com' }, port => sub { 443 }, user_name => sub { undef } );
+    $module->mock( _current_path => sub { '/base/' } );
+
+    my $transport = bless {}, 'Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV';
+
+    subtest 'empty collection' => sub {
+        plan tests => 1;
+        my $files = $transport->_list_files;
+        is_deeply( $files, [], 'no entries when the multistatus response only describes the collection itself' );
+    };
+
+    $ua_module->mock(
+        start => sub {
+            return _mock_response(<<'XML');
+<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/base/</D:href>
+    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/base/subdir/</D:href>
+    <D:propstat><D:prop>
+      <D:resourcetype><D:collection/></D:resourcetype>
+      <D:getlastmodified>Tue, 29 Sep 2026 10:00:00 GMT</D:getlastmodified>
+    </D:prop></D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/base/report.csv</D:href>
+    <D:propstat><D:prop>
+      <D:resourcetype/>
+      <D:getcontentlength>1234</D:getcontentlength>
+      <D:getlastmodified>Tue, 29 Sep 2026 11:00:00 GMT</D:getlastmodified>
+    </D:prop></D:propstat>
+  </D:response>
+</D:multistatus>
+XML
+        }
+    );
+
+    subtest 'mixed files and subdirectories' => sub {
+        plan tests => 4;
+        my $files = $transport->_list_files;
+        is( scalar @$files, 2, 'collection itself excluded, two entries returned' );
+        my ($dir)  = grep { $_->{type} eq 'directory' } @$files;
+        my ($file) = grep { $_->{type} eq 'file' } @$files;
+        is( $dir->{filename}, 'subdir', 'subdirectory filename parsed from href' );
+        is( $file->{filename}, 'report.csv', 'file filename parsed from href' );
+        is( $file->{size}, 1234, 'file size parsed from getcontentlength' );
+    };
+
+    $ua_module->mock(
+        start => sub {
+            return _mock_response(<<'XML');
+<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/base/</D:href>
+    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/base/emptydir/</D:href>
+    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+  </D:response>
+</D:multistatus>
+XML
+        }
+    );
+
+    subtest 'collection entry omitting getcontentlength' => sub {
+        plan tests => 2;
+        my $files = $transport->_list_files;
+        is( scalar @$files, 1, 'one entry returned' );
+        is( $files->[0]->{size}, undef, 'size is undef for a collection with no getcontentlength' );
+    };
+};
+
+subtest '_upload_file request shape' => sub {
+    plan tests => 3;
+
+    my ( $captured_url, $captured_body );
+    my $ua_module = Test::MockModule->new('Mojo::UserAgent');
+    $ua_module->mock(
+        put => sub {
+            my ( $self, $url, $headers, $body ) = @_;
+            $captured_url  = "$url";
+            $captured_body = $body;
+            my $res = Mojo::Message::Response->new;
+            $res->code(201);
+            my $tx = Mojo::Transaction::HTTP->new;
+            $tx->res($res);
+            return $tx;
+        }
+    );
+
+    my $module = Test::MockModule->new('Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV');
+    $module->mock( host => sub { 'dav.example.com' }, port => sub { 443 }, user_name => sub { undef } );
+    $module->mock( _current_path => sub { '/base/' } );
+
+    my $transport = bless {}, 'Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV';
+
+    require File::Temp;
+    my $tmp = File::Temp->new;
+    print $tmp "hello webdav";
+    close $tmp;
+
+    my $ok = $transport->_upload_file( "$tmp", 'uploaded.txt' );
+    ok( $ok, 'upload reports success' );
+    is( $captured_url, 'https://dav.example.com:443/base/uploaded.txt', 'PUT issued against the current path + remote filename' );
+    is( $captured_body, 'hello webdav', 'local file content sent as the request body' );
+};
+
+subtest '_rename_file request shape' => sub {
+    plan tests => 3;
+
+    my ( $captured_verb, $captured_source, $captured_headers );
+    my $ua_module = Test::MockModule->new('Mojo::UserAgent');
+    $ua_module->mock(
+        build_tx => sub {
+            my ( $self, $verb, $url, $headers ) = @_;
+            $captured_verb    = $verb;
+            $captured_source  = "$url";
+            $captured_headers = $headers;
+            return Mojo::Transaction::HTTP->new;
+        },
+        start => sub {
+            my $res = Mojo::Message::Response->new;
+            $res->code(201);
+            my $tx = Mojo::Transaction::HTTP->new;
+            $tx->res($res);
+            return $tx;
+        }
+    );
+
+    my $module = Test::MockModule->new('Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV');
+    $module->mock( host => sub { 'dav.example.com' }, port => sub { 443 }, user_name => sub { undef } );
+    $module->mock( _current_path => sub { '/base/' } );
+
+    my $transport = bless {}, 'Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV';
+
+    my $ok = $transport->_rename_file( 'old.txt', 'new.txt' );
+    ok( $ok, 'rename reports success' );
+    is( $captured_verb, 'MOVE', 'MOVE verb used' );
+    is(
+        $captured_headers->{Destination},
+        'https://dav.example.com:443/base/new.txt',
+        'Destination header set to the absolute destination URL'
+    );
+};
+
+# _download_file's remaining behaviour (beyond the GET request shape, which
+# is structurally identical to _upload_file's PUT, covered above) is writing
+# the response body to a local path via Mojo::Asset's move_to(). A fresh
+# Mojo::Message::Response with ->body(...) set gets a real Mojo::Asset::Memory
+# under the hood, and move_to() on that is a genuine (not mocked) filesystem
+# write - so this is exercised for real here, not stubbed out.
+subtest '_download_file request shape' => sub {
+    plan tests => 3;
+
+    my $captured_url;
+    my $ua_module = Test::MockModule->new('Mojo::UserAgent');
+    $ua_module->mock(
+        get => sub {
+            my ( $self, $url ) = @_;
+            $captured_url = "$url";
+            my $res = Mojo::Message::Response->new;
+            $res->code(200);
+            $res->body('downloaded content');
+            my $tx = Mojo::Transaction::HTTP->new;
+            $tx->res($res);
+            return $tx;
+        }
+    );
+
+    my $module = Test::MockModule->new('Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV');
+    $module->mock( host => sub { 'dav.example.com' }, port => sub { 443 }, user_name => sub { undef } );
+    $module->mock( _current_path => sub { '/base/' } );
+
+    my $transport = bless {}, 'Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV';
+
+    require File::Temp;
+    my $tmp = File::Temp->new;
+    my $local_file = "$tmp";
+    close $tmp;
+
+    my $ok = $transport->_download_file( 'report.csv', $local_file );
+    ok( $ok, 'download reports success' );
+    is( $captured_url, 'https://dav.example.com:443/base/report.csv', 'GET issued against the current path + remote filename' );
+
+    open my $fh, '<', $local_file or die "Cannot open $local_file: $!";
+    local $/;
+    my $written = <$fh>;
+    close $fh;
+    is( $written, 'downloaded content', 'response body written to the local file via move_to' );
+};
+
 subtest '_response_error' => sub {
     plan tests => 3;
 
