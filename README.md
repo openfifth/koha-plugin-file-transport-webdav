@@ -1,6 +1,19 @@
-# Koha Plugin Auto Release Template
+# koha-plugin-file-transport-webdav
 
-This template provides an automated release process for Koha plugins, based on the Bywater Solutions auto-release workflow.
+Adds a WebDAV backend to Koha's Administration > File transports, via bug
+43666's pluggable Single Table Inheritance registration mechanism
+(`Koha::Objects::Mixin::SingleTableInheritance::Pluggable`). Serves as the
+reference example for that mechanism, linked from bug 43666's own Bugzilla
+comments.
+
+**Requires** a Koha instance with bug 43663 and bug 43666 applied - neither
+is in any released Koha version yet. Installing this plugin alone has no
+visible effect: it also requires the `enable_plugin_sti_registration`
+koha-conf.xml kill-switch on, and this plugin explicitly permitted for
+`Koha::File::Transports` in the Plugin management UI - both off by default.
+
+See `docs/superpowers/specs/2026-09-29-webdav-file-transport-design.md`
+for the full design, and `CLAUDE.md` for module layout and conventions.
 
 ## Features
 
@@ -35,8 +48,8 @@ This template provides an automated release process for Koha plugins, based on t
    ```json
    {
        "plugin": {
-           "module": "Koha::Plugin::Com::YourOrg::YourPlugin",
-           "pm_path": "Koha/Plugin/Com/YourOrg/YourPlugin.pm"
+           "module": "Koha::Plugin::Com::OpenFifth::FileTransportWebDAV",
+           "pm_path": "Koha/Plugin/Com/OpenFifth/FileTransportWebDAV.pm"
        },
        "version": "1.0.0",
        "previous_version": "0.0.0"
