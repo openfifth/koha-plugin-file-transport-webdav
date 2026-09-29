@@ -142,11 +142,11 @@ You can customize the workflow by:
 
 ## Testing against a real WebDAV server
 
-`compose/webdav.yml` adds a `bytemark/webdav` service (Basic auth,
-self-signed TLS) to a running KTD instance, for real end-to-end testing
-of this plugin's transport (rather than the public test WebDAV servers
-that exist on the internet, which are third-party services not
-appropriate to build a repeatable test plan around).
+`compose/webdav.yml` adds a `bytemark/webdav` service (Basic auth) to a
+running KTD instance, for real end-to-end testing of this plugin's
+transport (rather than the public test WebDAV servers that exist on the
+internet, which are third-party services not appropriate to build a
+repeatable test plan around).
 
 Bring it up alongside a KTD instance that also has this plugin mounted:
 
@@ -154,15 +154,31 @@ Bring it up alongside a KTD instance that also has this plugin mounted:
 ktd --name bug_43666 --single-plugin "$(pwd)" -f "$(pwd)/compose/webdav.yml" up -d
 ```
 
-Reachable from the `koha` container at `https://webdav:443/` (compose
-service-name DNS) and from the host at `https://localhost:8443/` for
+Reachable from the `koha` container at `http://webdav:80/` (compose
+service-name DNS) and from the host at `http://localhost:8090/` for
 manual `curl`/browser sanity checks. Credentials: `koha`/`koha`.
 
-Because the cert is self-signed, a `file_transports` row pointed at this
-container needs its `debug` flag on (see `Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV::_ua`)
-to skip TLS verification - this is a test-only convenience, not a recommendation
-for production WebDAV endpoints, which should use a properly-signed certificate
-and leave `debug` off.
+**Plain HTTP only, verified against a live KTD instance.** The design
+originally called for `SSL_CERT: selfsigned` so this container could also
+exercise the `debug` flag's TLS-verification-skip path (see
+`Koha::Plugin::Com::OpenFifth::File::Transport::WebDAV::_ua`) end-to-end.
+In practice, `bytemark/webdav` is an unmaintained ~2018 Alpine 3.8 image
+(both its `latest` and `2.4` tags are identical and equally old) whose
+bundled `mod_ssl.so` fails to load against its own bundled `libssl`
+("`Error relocating .../mod_ssl.so: SSL_CTX_set_post_handshake_auth:
+symbol not found`") - a known, unfixed upstream bug
+(BytemarkHosting/docker-webdav#52), not something specific to this host.
+There is no other tag to pin to, so this test container cannot serve
+HTTPS at all; a `file_transports` row pointed at it should therefore use
+a plain `http://webdav/` `host` value and leave `debug` off. The `debug`/
+TLS-skip code path itself (`$ua->insecure(1) if $self->debug`) is still
+implemented in `_ua`, but neither this real test container nor
+`t/Transport/WebDAV.t`'s mocked tests currently exercise it - it's
+untested code, pending either a TLS-capable test server or a dedicated
+unit test that mocks `$self->debug`. Real HTTPS WebDAV endpoints with a
+properly-signed certificate are unaffected by this container's SSL bug;
+`debug` remains intended as a test-only convenience for self-signed certs
+on servers that actually support TLS.
 
 ## Maintenance
 

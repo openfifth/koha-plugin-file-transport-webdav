@@ -5,15 +5,30 @@ services:
             AUTH_TYPE: Basic
             USERNAME: koha
             PASSWORD: koha
-            SSL_CERT: selfsigned
+            # NOTE: no SSL_CERT here. bytemark/webdav (an Alpine 3.8 image,
+            # unmaintained since ~2018) ships a mod_ssl.so relocated
+            # against a libssl ABI its own bundled libssl.so no longer
+            # provides - enabling SSL_CERT: selfsigned makes httpd fail to
+            # start ("Error relocating .../mod_ssl.so:
+            # SSL_CTX_set_post_handshake_auth: symbol not found"). This is
+            # a known, unfixed upstream bug (there is no other tag to pin
+            # to - "latest" and "2.4" are identical, both ~8 years old; see
+            # BytemarkHosting/docker-webdav#52), verified against a live
+            # KTD instance, not something specific to this host. The
+            # container therefore serves DAV over plain HTTP only; see
+            # README's "Testing against a real WebDAV server" section.
         ports:
-            - "8443:443"
+            - "8090:80"
         networks:
             - kohanet
 
-networks:
-    kohanet:
-        external: true
-        # NOTE: assumes default compose project-name prefixing; verify with
-        # 'docker network ls | grep kohanet' against a live KTD instance
-        name: ${COMPOSE_PROJECT_NAME:-bug_43666}_kohanet
+# No top-level `networks:` block here on purpose. `ktd` always merges this
+# file with its own compose/base.yml (which already declares the `kohanet`
+# network) in one `docker compose` invocation - it is never applied
+# standalone. Re-declaring `kohanet` here as `external: true` merges into
+# the combined project's network definition and makes the *whole* network
+# external, which breaks its creation on a first `up` (verified against a
+# live KTD instance: "network ..._kohanet declared as external, but could
+# not be found"). Simply joining the network by name, as the `webdav`
+# service does above, is enough - the definition already present via
+# base.yml applies.

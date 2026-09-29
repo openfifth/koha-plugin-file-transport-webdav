@@ -45,9 +45,14 @@ monorepo layout and the `kd` worktree/KTD workflow.
 - TLS certificate verification is skipped only when the transport row's
   `debug` flag is on (`Koha::Plugin::Com::OpenFifth::File::Transport::
   WebDAV::_ua`) - there is no dedicated column for this, and adding one
-  is out of scope for a plugin. This exists for the self-signed cert on
-  the KTD test container (see below); leave `debug` off against a real
-  WebDAV endpoint with a properly-signed certificate.
+  is out of scope for a plugin. This was intended for a self-signed cert
+  on the KTD test container, but `compose/webdav.yml`'s `bytemark/webdav`
+  image turned out to have a broken, unfixed upstream `mod_ssl.so` (see
+  README's "Testing against a real WebDAV server") and now serves plain
+  HTTP only - so this code path is implemented but currently untested
+  (neither the real test container nor `t/Transport/WebDAV.t`'s mocks
+  exercise it). Leave `debug` off against a real WebDAV endpoint with a
+  properly-signed certificate.
 - `_current_directory`/`_change_directory` track a path client-side
   (`{current_directory}` on the blessed hashref), exactly like
   `Koha::File::Transport::Local` does - WebDAV has no server-side
